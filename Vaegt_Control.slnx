@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="Vaegt_Control/Vaegt_Control.csproj" />
+  <Project Path="Vaegt_Library/Vaegt_Library.csproj" />
+</Solution>

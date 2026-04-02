@@ -1,0 +1,178 @@
+﻿@page "/maalsaetninger"
+@rendermode InteractiveServer
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.Identity
+@using Microsoft.EntityFrameworkCore
+@using Vaegt_Control.Data
+@using Vaegt_Library.Vaegt_Library
+@inject ApplicationDbContext Db
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject UserManager<ApplicationUser> UserManager
+
+<h3>Målsætninger</h3>
+
+@if (isLoading)
+{
+    <p>Indlæser...</p>
+}
+else if (!string.IsNullOrWhiteSpace(errorMessage))
+{
+    <div class="alert alert-danger">@errorMessage</div>
+}
+else
+{
+    <EditForm Model="model" OnValidSubmit="Save" FormName="MaalsaetningerForm">
+        <DataAnnotationsValidator />
+        <ValidationSummary />
+
+        <div class="mb-3">
+            <label class="form-label">Bruger</label>
+            <input class="form-control" value="@currentUserName" readonly />
+        </div>
+        <div class="mb-3">
+            <label class="form-label">Måldato</label>
+            <InputDate TValue="DateTime?" @bind-Value="model.MaalDato" class="form-control" />
+        </div>
+        <div class="mb-3">
+            <label class="form-label">Målvægt (kg)</label>
+            <InputNumber TValue="decimal?" @bind-Value="model.MaalVaegtKg" class="form-control" />
+        </div>
+
+        <div class="mb-3">
+            <label class="form-label">Måletidspunkt (fx 08:30)</label>
+            <InputText @bind-Value="mealTimeText" class="form-control" />
+        </div>
+
+        <div class="mb-3">
+            <label class="form-label">Visceral fat mål</label>
+            <InputNumber TValue="int?" @bind-Value="model.VisceralFatMaal" class="form-control" />
+        </div>
+
+        <div class="mb-3">
+            <label class="form-label">BMI mål</label>
+            <InputNumber TValue="decimal?" @bind-Value="model.BmiMaal" class="form-control" />
+        </div>
+
+        <button type="submit" class="btn btn-primary">Gem målsætninger</button>
+    </EditForm>
+
+    @if (!string.IsNullOrWhiteSpace(message))
+    {
+        <div class="alert alert-success mt-3">@message</div>
+    }
+}
+
+@code {
+    private MaalsaetningModel model = new();
+    private bool isLoading = true;
+    private string message = "";
+    private string errorMessage = "";
+    private string? mealTimeText;
+    private string currentUserName = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        var principal = authState.User;
+
+        if (principal.Identity?.IsAuthenticated != true)
+        {
+            errorMessage = "Du er ikke logget ind.";
+            isLoading = false;
+            return;
+        }
+
+        var appUser = await UserManager.GetUserAsync(principal);
+
+        if (appUser == null)
+        {
+            errorMessage = "Bruger kunne ikke findes.";
+            isLoading = false;
+            return;
+        }
+
+        currentUserName = appUser.UserName ?? appUser.Email ?? "";
+
+        if (string.IsNullOrWhiteSpace(currentUserName))
+        {
+            errorMessage = "Brugernavn mangler.";
+            isLoading = false;
+            return;
+        }
+
+        var existing = await Db.Maalsaetninger
+            .FirstOrDefaultAsync(x => x.UserId == currentUserName);
+
+        if (existing != null)
+        {
+            model = existing;
+
+            if (model.MaaltidsTidspunkt.HasValue)
+            {
+                mealTimeText = model.MaaltidsTidspunkt.Value.ToString("HH:mm");
+            }
+        }
+        else
+        {
+            model = new MaalsaetningModel
+            {
+                UserId = currentUserName
+            };
+        }
+
+        isLoading = false;
+    }
+
+    private async Task Save()
+    {
+        message = "";
+        errorMessage = "";
+
+        if (string.IsNullOrWhiteSpace(currentUserName))
+        {
+            errorMessage = "Brugernavn mangler. Kan ikke gemme.";
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(mealTimeText))
+        {
+            if (TimeOnly.TryParse(mealTimeText, out var parsedTime))
+            {
+                model.MaaltidsTidspunkt = parsedTime;
+            }
+            else
+            {
+                errorMessage = "Tidspunkt skal fx være 08:30.";
+                return;
+            }
+        }
+        else
+        {
+            model.MaaltidsTidspunkt = null;
+        }
+
+        model.UserId = currentUserName;
+
+        var existing = await Db.Maalsaetninger
+            .FirstOrDefaultAsync(x => x.UserId == currentUserName);
+
+        if (existing == null)
+        {
+            Db.Maalsaetninger.Add(model);
+        }
+        else
+        {
+            existing.UserId = currentUserName;
+            existing.MaalVaegtKg = model.MaalVaegtKg;
+            existing.MaaltidsTidspunkt = model.MaaltidsTidspunkt;
+            existing.VisceralFatMaal = model.VisceralFatMaal;
+            existing.BmiMaal = model.BmiMaal;
+            existing.MaalDato = model.MaalDato;
+        }
+
+        await Db.SaveChangesAsync();
+
+        message = $"Gemt: User={model.UserId}, Vægt={model.MaalVaegtKg}, Tid={mealTimeText}, Visceral={model.VisceralFatMaal}, BMI={model.BmiMaal}";
+    }
+}

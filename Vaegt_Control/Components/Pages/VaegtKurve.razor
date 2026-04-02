@@ -1,0 +1,291 @@
+﻿@page "/vaegtkurve"
+@rendermode InteractiveServer
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.Identity
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.JSInterop
+@using Vaegt_Control.Data
+@using Vaegt_Library
+@using Vaegt_Library.Vaegt_Library
+@inject ApplicationDbContext Db
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject UserManager<ApplicationUser> UserManager
+@inject IJSRuntime JS
+
+<h3 class="mb-4">Vægtkurve</h3>
+
+@if (isLoading)
+{
+    <p>Indlæser...</p>
+}
+else if (!string.IsNullOrWhiteSpace(errorMessage))
+{
+    <div class="alert alert-danger">@errorMessage</div>
+}
+else if (entries.Count < 2)
+{
+    <div class="alert alert-warning">
+        Du skal have mindst 2 vægtregistreringer for at vise en kurve.
+    </div>
+}
+else if (goal == null || !goal.MaalVaegtKg.HasValue || !goal.MaalDato.HasValue)
+{
+    <div class="alert alert-warning">
+        Du mangler målvægt eller måldato under Målsætninger.
+    </div>
+}
+else
+{
+    <div class="row g-3 mb-4">
+        <div class="col-md-2">
+            <div class="card shadow-sm h-100">
+                <div class="card-body">
+                    <div class="text-muted small">Startvægt</div>
+                    <div class="fs-4 fw-bold">@startWeight.ToString("0.0") kg</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-2">
+            <div class="card shadow-sm h-100">
+                <div class="card-body">
+                    <div class="text-muted small">Nuværende</div>
+                    <div class="fs-4 fw-bold">@currentWeight.ToString("0.0") kg</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-2">
+            <div class="card shadow-sm h-100">
+                <div class="card-body">
+                    <div class="text-muted small">Målvægt</div>
+                    <div class="fs-4 fw-bold">@goal!.MaalVaegtKg?.ToString("0.0") kg</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-3">
+            <div class="card shadow-sm h-100">
+                <div class="card-body">
+                    <div class="text-muted small">Forventet vægt i dag</div>
+                    <div class="fs-4 fw-bold">@expectedTodayWeight.ToString("0.0") kg</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-3">
+            <div class="card shadow-sm h-100">
+                <div class="card-body">
+                    <div class="text-muted small">Afvigelse</div>
+                    <div class="fs-5 fw-bold @statusClass">@statusText</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card shadow-sm border-0 mb-4">
+        <div class="card-body">
+            <div class="fw-bold mb-3">Vægtudvikling</div>
+            <div style="height: 420px;">
+                <canvas id="weightChart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <div class="card shadow-sm border-0">
+        <div class="card-body">
+            <div class="fw-bold mb-3">Plan mod målet</div>
+
+            <div class="row g-3">
+                <div class="col-md-4">
+                    <div class="p-3 rounded" style="background:#f8fafc;">
+                        <div class="text-muted small">Fra</div>
+                        <div class="fw-bold">@entries.First().Date.ToString("dd-MM-yyyy")</div>
+                        <div>@startWeight.ToString("0.0") kg</div>
+                    </div>
+                </div>
+
+                <div class="col-md-4">
+                    <div class="p-3 rounded" style="background:#f8fafc;">
+                        <div class="text-muted small">I dag</div>
+                        <div class="fw-bold">@DateTime.Today.ToString("dd-MM-yyyy")</div>
+                        <div>Forventet: @expectedTodayWeight.ToString("0.0") kg</div>
+                        <div>Faktisk: @currentWeight.ToString("0.0") kg</div>
+                    </div>
+                </div>
+
+                <div class="col-md-4">
+                    <div class="p-3 rounded" style="background:#f8fafc;">
+                        <div class="text-muted small">Mål</div>
+                        <div class="fw-bold">@goal.MaalDato?.ToString("dd-MM-yyyy")</div>
+                        <div>@goal.MaalVaegtKg?.ToString("0.0") kg</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<WeightEntry> entries = new();
+    private MaalsaetningModel? goal;
+    private bool isLoading = true;
+    private string errorMessage = "";
+    private string currentUserName = "";
+
+    private double startWeight;
+    private double currentWeight;
+    private double expectedTodayWeight;
+    private string statusText = "";
+    private string statusClass = "";
+
+    private List<string> chartLabels = new();
+    private List<double?> actualData = new();
+    private List<double?> expectedData = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+            var principal = authState.User;
+
+            if (principal.Identity?.IsAuthenticated != true)
+            {
+                errorMessage = "Du er ikke logget ind.";
+                return;
+            }
+
+            var appUser = await UserManager.GetUserAsync(principal);
+
+            if (appUser == null)
+            {
+                errorMessage = "Bruger kunne ikke findes.";
+                return;
+            }
+
+            currentUserName = appUser.UserName ?? appUser.Email ?? "";
+
+            if (string.IsNullOrWhiteSpace(currentUserName))
+            {
+                errorMessage = "Brugernavn mangler.";
+                return;
+            }
+
+            entries = await Db.WeightEntries
+                .Where(x => x.UserId == currentUserName)
+                .OrderBy(x => x.Date)
+                .ToListAsync();
+
+            goal = await Db.Maalsaetninger
+                .FirstOrDefaultAsync(x => x.UserId == currentUserName);
+
+            if (entries.Count >= 2 && goal != null && goal.MaalVaegtKg.HasValue && goal.MaalDato.HasValue)
+            {
+                BuildOverviewAndChart();
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Fejl ved indlæsning: {ex.Message}";
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!isLoading && string.IsNullOrWhiteSpace(errorMessage) && chartLabels.Count > 0)
+        {
+            await JS.InvokeVoidAsync(
+                "weightChartInterop.renderChart",
+                "weightChart",
+                chartLabels,
+                actualData,
+                expectedData);
+        }
+    }
+
+    private void BuildOverviewAndChart()
+    {
+        if (goal == null || !goal.MaalVaegtKg.HasValue || !goal.MaalDato.HasValue || entries.Count < 2)
+            return;
+
+        var goalWeight = (double)goal.MaalVaegtKg.Value;
+        var goalDate = goal.MaalDato.Value.Date;
+
+        startWeight = entries.First().WeightKg;
+        currentWeight = entries.Last().WeightKg;
+
+        var startDate = entries.First().Date.Date;
+        expectedTodayWeight = ExpectedWeightToday(startDate, goalDate, startWeight, goalWeight, DateTime.Today);
+
+        var difference = currentWeight - expectedTodayWeight;
+
+        if (difference <= -0.2)
+        {
+            statusText = $"Foran planen ({difference:0.0} kg)";
+            statusClass = "text-success";
+        }
+        else if (difference >= 0.2)
+        {
+            statusText = $"Bag planen (+{difference:0.0} kg)";
+            statusClass = "text-danger";
+        }
+        else
+        {
+            statusText = "På planen";
+            statusClass = "text-primary";
+        }
+
+        BuildChartData(startDate, goalDate, goalWeight);
+    }
+
+    private void BuildChartData(DateTime startDate, DateTime goalDate, double goalWeight)
+    {
+        chartLabels.Clear();
+        actualData.Clear();
+        expectedData.Clear();
+
+        var allDates = new List<DateTime>();
+
+        foreach (var e in entries)
+        {
+            if (!allDates.Contains(e.Date.Date))
+                allDates.Add(e.Date.Date);
+        }
+
+        if (!allDates.Contains(goalDate))
+            allDates.Add(goalDate);
+
+        allDates = allDates.OrderBy(d => d).ToList();
+
+        foreach (var date in allDates)
+        {
+            chartLabels.Add(date.ToString("dd-MM-yyyy"));
+
+            var actualEntry = entries.FirstOrDefault(x => x.Date.Date == date);
+            actualData.Add(actualEntry?.WeightKg);
+
+            var expected = ExpectedWeightToday(startDate, goalDate, startWeight, goalWeight, date);
+            expectedData.Add(Math.Round(expected, 1));
+        }
+    }
+
+    private double ExpectedWeightToday(DateTime start, DateTime goalDate, double startW, double goalW, DateTime date)
+    {
+        if (date <= start) return startW;
+        if (date >= goalDate) return goalW;
+
+        var totalDays = (goalDate - start).TotalDays;
+        var passedDays = (date - start).TotalDays;
+
+        if (totalDays <= 0) return goalW;
+
+        var progress = passedDays / totalDays;
+        return startW + ((goalW - startW) * progress);
+    }
+}

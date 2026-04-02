@@ -1,0 +1,286 @@
+﻿@page "/vaegtdata"
+@rendermode InteractiveServer
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.Identity
+@using Microsoft.EntityFrameworkCore
+@using Vaegt_Control.Data
+@using Vaegt_Library
+@inject ApplicationDbContext Db
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject UserManager<ApplicationUser> UserManager
+
+<h3>Daglige vægtdata</h3>
+
+@if (isLoading)
+{
+    <p>Indlæser...</p>
+}
+else if (!string.IsNullOrWhiteSpace(errorMessage))
+{
+    <div class="alert alert-danger">@errorMessage</div>
+}
+else
+{
+    <EditForm Model="entry" OnValidSubmit="SaveEntry" FormName="VaegtDataForm">
+        <DataAnnotationsValidator />
+        <ValidationSummary />
+
+        <div class="mb-3">
+            <label class="form-label">Bruger</label>
+            <input class="form-control" value="@currentUserName" readonly />
+        </div>
+
+        <div class="mb-3">
+            <label class="form-label">Højde (meter)</label>
+            <input class="form-control" value="@heightMeters" readonly />
+        </div>
+
+        <div class="row">
+            <div class="col-md-3 mb-3">
+                <label class="form-label">Dato</label>
+                <InputDate TValue="DateTime" @bind-Value="entry.Date" class="form-control" />
+            </div>
+
+            <div class="col-md-3 mb-3">
+                <label class="form-label">Vægt (kg)</label>
+                <InputNumber TValue="decimal?" @bind-Value="weightKg" class="form-control" @bind-Value:after="UpdateBmi" />
+            </div>
+
+            <div class="col-md-3 mb-3">
+                <label class="form-label">Visceral fat rating</label>
+                <InputNumber TValue="int?" @bind-Value="entry.VisceralFatRating" class="form-control" />
+            </div>
+
+            <div class="col-md-3 mb-3">
+                <label class="form-label">BMI (beregnes automatisk)</label>
+                <input class="form-control" value="@DisplayBmi()" readonly />
+            </div>
+        </div>
+
+        <div class="mb-3">
+            <label class="form-label">Note</label>
+            <InputTextArea @bind-Value="entry.Note" class="form-control" />
+        </div>
+
+        <button type="submit" class="btn btn-primary">Gem registrering</button>
+        <button type="button" class="btn btn-secondary ms-2" @onclick="ResetForm">Ny</button>
+    </EditForm>
+
+    @if (!string.IsNullOrWhiteSpace(message))
+    {
+        <div class="alert alert-success mt-3">@message</div>
+    }
+
+    <hr />
+
+    <h4>Registreringer</h4>
+
+    @if (entries.Count == 0)
+    {
+        <p>Ingen registreringer fundet.</p>
+    }
+    else
+    {
+        <table class="table table-striped">
+            <thead>
+                <tr>
+                    <th>Dato</th>
+                    <th>Vægt</th>
+                    <th>Visceral fat</th>
+                    <th>BMI</th>
+                    <th>Note</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var item in entries)
+                {
+                    <tr>
+                        <td>@item.Date.ToShortDateString()</td>
+                        <td>@item.WeightKg</td>
+                        <td>@item.VisceralFatRating</td>
+                        <td>@item.BMI</td>
+                        <td>@item.Note</td>
+                        <td>
+                            <button class="btn btn-sm btn-warning" @onclick="() => EditEntry(item)">Rediger</button>
+                            <button class="btn btn-sm btn-danger ms-1" @onclick="() => DeleteEntry(item.Id)">Slet</button>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+}
+
+@code {
+    private WeightEntry entry = new();
+    private List<WeightEntry> entries = new();
+    private bool isLoading = true;
+    private string message = "";
+    private string errorMessage = "";
+    private string currentUserName = "";
+    private decimal? weightKg;
+
+    private decimal heightMeters = 1.73m;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        var principal = authState.User;
+
+        if (principal.Identity?.IsAuthenticated != true)
+        {
+            errorMessage = "Du er ikke logget ind.";
+            isLoading = false;
+            return;
+        }
+
+        var appUser = await UserManager.GetUserAsync(principal);
+
+        if (appUser == null)
+        {
+            errorMessage = "Bruger kunne ikke findes.";
+            isLoading = false;
+            return;
+        }
+
+        currentUserName = appUser.UserName ?? appUser.Email ?? "";
+
+        if (string.IsNullOrWhiteSpace(currentUserName))
+        {
+            errorMessage = "Brugernavn mangler.";
+            isLoading = false;
+            return;
+        }
+
+        ResetForm();
+        await LoadEntries();
+
+        isLoading = false;
+    }
+
+    private async Task LoadEntries()
+    {
+        entries = await Db.WeightEntries
+            .Where(x => x.UserId == currentUserName)
+            .OrderByDescending(x => x.Date)
+            .ToListAsync();
+    }
+
+    private void UpdateBmi()
+    {
+        if (weightKg.HasValue && heightMeters > 0)
+        {
+            var bmi = weightKg.Value / (heightMeters * heightMeters);
+            entry.BMI = Math.Round(bmi, 1);
+        }
+        else
+        {
+            entry.BMI = null;
+        }
+    }
+
+    private string DisplayBmi()
+    {
+        return entry.BMI?.ToString("0.0") ?? "";
+    }
+
+    private async Task SaveEntry()
+    {
+        message = "";
+        errorMessage = "";
+
+        if (string.IsNullOrWhiteSpace(currentUserName))
+        {
+            errorMessage = "Brugernavn mangler. Kan ikke gemme.";
+            return;
+        }
+
+        if (!weightKg.HasValue)
+        {
+            errorMessage = "Du skal indtaste en vægt.";
+            return;
+        }
+
+        UpdateBmi();
+
+        entry.UserId = currentUserName;
+        entry.WeightKg = (double)weightKg.Value;
+
+        if (entry.Id == 0)
+        {
+            Db.WeightEntries.Add(entry);
+        }
+        else
+        {
+            var existing = await Db.WeightEntries.FirstOrDefaultAsync(x => x.Id == entry.Id);
+
+            if (existing == null)
+            {
+                errorMessage = "Registreringen kunne ikke findes.";
+                return;
+            }
+
+            existing.UserId = currentUserName;
+            existing.Date = entry.Date;
+            existing.WeightKg = entry.WeightKg;
+            existing.VisceralFatRating = entry.VisceralFatRating;
+            existing.BMI = entry.BMI;
+            existing.Note = entry.Note;
+        }
+
+        await Db.SaveChangesAsync();
+        await LoadEntries();
+
+        message = $"Registrering gemt for {currentUserName}. Dato={entry.Date:dd-MM-yyyy}, Vægt={entry.WeightKg}, BMI={entry.BMI}";
+        ResetForm();
+    }
+
+    private void EditEntry(WeightEntry item)
+    {
+        entry = new WeightEntry
+        {
+            Id = item.Id,
+            UserId = item.UserId,
+            Date = item.Date,
+            WeightKg = item.WeightKg,
+            VisceralFatRating = item.VisceralFatRating,
+            BMI = item.BMI,
+            Note = item.Note
+        };
+
+        weightKg = (decimal)item.WeightKg;
+        UpdateBmi();
+
+        message = $"Redigerer registrering fra {item.Date:dd-MM-yyyy}";
+        errorMessage = "";
+    }
+
+    private async Task DeleteEntry(int id)
+    {
+        var item = await Db.WeightEntries.FirstOrDefaultAsync(x => x.Id == id);
+
+        if (item != null)
+        {
+            Db.WeightEntries.Remove(item);
+            await Db.SaveChangesAsync();
+            await LoadEntries();
+            ResetForm();
+            message = "Registrering slettet.";
+            errorMessage = "";
+        }
+    }
+
+    private void ResetForm()
+    {
+        entry = new WeightEntry
+        {
+            Date = DateTime.Today,
+            Note = ""
+        };
+
+        weightKg = null;
+        errorMessage = "";
+    }
+}

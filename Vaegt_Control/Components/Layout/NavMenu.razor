@@ -1,0 +1,66 @@
+﻿@using Microsoft.AspNetCore.Components.Authorization
+
+<div class="top-row ps-3 navbar navbar-dark">
+    <div class="container-fluid">
+        <a class="navbar-brand" href="">Vaegt_Control</a>
+    </div>
+</div>
+
+<input type="checkbox" title="Navigation menu" class="navbar-toggler" />
+
+<div class="nav-scrollable" onclick="document.querySelector('.navbar-toggler').click()">
+    <nav class="flex-column">
+
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="" Match="NavLinkMatch.All">
+                <span class="bi bi-house-door-fill" aria-hidden="true"></span> Home
+            </NavLink>
+        </div>
+
+        <AuthorizeView>
+            <Authorized>
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="maalsaetninger">
+                        <span class="bi bi-flag" aria-hidden="true"></span> Målsætninger
+                    </NavLink>
+                </div>
+
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="vaegtdata">
+                        <span class="bi bi-pencil-square" aria-hidden="true"></span> Daglige vægtdata
+                    </NavLink>
+                </div>
+
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="vaegtkurve">
+                        <span class="bi bi-graph-up" aria-hidden="true"></span> Vægtkurve
+                    </NavLink>
+                </div>
+
+                <div class="nav-item px-3">
+                    <form action="/Account/Logout" method="post">
+                        <AntiforgeryToken />
+                        <button type="submit" class="nav-link btn btn-link w-100 text-start border-0">
+                            <span class="bi bi-box-arrow-right" aria-hidden="true"></span> Log ud
+                        </button>
+                    </form>
+                </div>
+            </Authorized>
+
+            <NotAuthorized>
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="Account/Register">
+                        <span class="bi bi-person-plus" aria-hidden="true"></span> Register
+                    </NavLink>
+                </div>
+
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="Account/Login">
+                        <span class="bi bi-box-arrow-in-right" aria-hidden="true"></span> Login
+                    </NavLink>
+                </div>
+            </NotAuthorized>
+        </AuthorizeView>
+
+    </nav>
+</div>
