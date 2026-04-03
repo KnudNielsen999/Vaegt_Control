@@ -9,10 +9,6 @@
       "ignored": "true",
       "type": "mssql",
       "connectionId": "ConnectionStrings:DatabaseConnection"
-    },
-    "sqlite1": {
-      "ignored": "true",
-      "type": "sqlite"
     }
   }
 }

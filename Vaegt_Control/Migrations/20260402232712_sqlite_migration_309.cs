@@ -5,7 +5,7 @@
 namespace Vaegt_Control.Migrations
 {
     /// <inheritdoc />
-    public partial class AddGoalsAndWeightFields : Migration
+    public partial class sqlite_migration_309 : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
