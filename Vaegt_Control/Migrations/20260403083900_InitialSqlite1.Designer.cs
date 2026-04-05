@@ -11,8 +11,8 @@ using Vaegt_Control.Data;
 namespace Vaegt_Control.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    [Migration("20260402230731_weight1")]
-    partial class weight1
+    [Migration("20260403083900_InitialSqlite1")]
+    partial class InitialSqlite1
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)

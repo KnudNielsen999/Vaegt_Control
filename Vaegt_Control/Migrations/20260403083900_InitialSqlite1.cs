@@ -6,7 +6,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace Vaegt_Control.Migrations
 {
     /// <inheritdoc />
-    public partial class weight : Migration
+    public partial class InitialSqlite1 : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
