@@ -1,0 +1,313 @@
+﻿@page "/dashboard"
+@rendermode InteractiveServer
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.Identity
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.JSInterop
+@using Vaegt_Control.Data
+@using Vaegt_Library
+@using Vaegt_Library.Vaegt_Library
+@inject ApplicationDbContext Db
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject UserManager<ApplicationUser> UserManager
+@inject IJSRuntime JS
+
+<h3 class="mb-4">Mit dashboard</h3>
+
+@if (isLoading)
+{
+    <p>Indlæser...</p>
+}
+else if (!string.IsNullOrWhiteSpace(errorMessage))
+{
+    <div class="alert alert-danger">@errorMessage</div>
+}
+else
+{
+    <div class="mb-3">
+        <div class="text-muted">Velkommen</div>
+        <div class="fs-5 fw-bold">@currentUserName</div>
+    </div>
+
+    <div class="row g-3 mb-4">
+        <div class="col-md-2">
+            <div class="card shadow-sm h-100">
+                <div class="card-body">
+                    <div class="text-muted small">Seneste vægt</div>
+                    <div class="fs-3 fw-bold">@DisplayWeight(currentWeight)</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-2">
+            <div class="card shadow-sm h-100">
+                <div class="card-body">
+                    <div class="text-muted small">Målvægt</div>
+                    <div class="fs-3 fw-bold">@DisplayWeight(goalWeight)</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-3">
+            <div class="card shadow-sm h-100">
+                <div class="card-body">
+                    <div class="text-muted small">Forventet vægt i dag</div>
+                    <div class="fs-3 fw-bold">@DisplayWeight(expectedTodayWeight)</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-2">
+            <div class="card shadow-sm h-100">
+                <div class="card-body">
+                    <div class="text-muted small">Tabt siden start</div>
+                    <div class="fs-3 fw-bold">@DisplayDifference(weightLost)</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-3">
+            <div class="card shadow-sm h-100">
+                <div class="card-body">
+                    <div class="text-muted small">BMI nu</div>
+                    <div class="fs-3 fw-bold">@DisplayDecimal(currentBmi)</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-3 mb-4">
+        <div class="col-md-4">
+            <div class="card shadow-sm h-100">
+                <div class="card-body">
+                    <div class="text-muted small">Visceral fat senest</div>
+                    <div class="fs-4 fw-bold">@DisplayInt(currentVisceralFat)</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-4">
+            <div class="card shadow-sm h-100">
+                <div class="card-body">
+                    <div class="text-muted small">Status mod planen</div>
+                    <div class="fs-5 fw-bold @statusClass">@statusText</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-4">
+            <div class="card shadow-sm h-100">
+                <div class="card-body">
+                    <div class="text-muted small">Kg til målet</div>
+                    <div class="fs-4 fw-bold">@DisplayDifference(kgToGoal)</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card shadow-sm border-0 mb-4">
+        <div class="card-body">
+            <div class="fw-bold mb-3">Seneste udvikling</div>
+
+            @if (recentEntries.Count >= 2)
+            {
+                <div style="height: 320px;">
+                    <canvas id="dashboardWeightChart"></canvas>
+                </div>
+            }
+            else
+            {
+                <p class="text-muted mb-0">Du skal have mindst 2 registreringer for at vise grafen.</p>
+            }
+        </div>
+    </div>
+
+    <div class="row g-3">
+        <div class="col-md-4">
+            <a class="btn btn-primary w-100 py-3" href="/maalsaetninger">
+                Gå til målsætninger
+            </a>
+        </div>
+
+        <div class="col-md-4">
+            <a class="btn btn-primary w-100 py-3" href="/vaegtdata">
+                Gå til daglige vægtdata
+            </a>
+        </div>
+
+        <div class="col-md-4">
+            <a class="btn btn-primary w-100 py-3" href="/vaegtkurve">
+                Gå til vægtkurve
+            </a>
+        </div>
+    </div>
+}
+
+@code {
+    private bool isLoading = true;
+    private string errorMessage = "";
+    private string currentUserName = "";
+
+    private List<WeightEntry> entries = new();
+    private List<WeightEntry> recentEntries = new();
+    private MaalsaetningModel? goal;
+
+    private double? startWeight;
+    private double? currentWeight;
+    private double? goalWeight;
+    private double? expectedTodayWeight;
+    private double? weightLost;
+    private decimal? currentBmi;
+    private int? currentVisceralFat;
+    private double? kgToGoal;
+    private string statusText = "Ingen plan";
+    private string statusClass = "text-muted";
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+            var principal = authState.User;
+
+            if (principal.Identity?.IsAuthenticated != true)
+            {
+                errorMessage = "Du er ikke logget ind.";
+                return;
+            }
+
+            var appUser = await UserManager.GetUserAsync(principal);
+
+            if (appUser == null)
+            {
+                errorMessage = "Bruger kunne ikke findes.";
+                return;
+            }
+
+            currentUserName = appUser.UserName ?? appUser.Email ?? "";
+
+            if (string.IsNullOrWhiteSpace(currentUserName))
+            {
+                errorMessage = "Brugernavn mangler.";
+                return;
+            }
+
+            entries = await Db.WeightEntries
+                .Where(x => x.UserId == currentUserName)
+                .OrderBy(x => x.Date)
+                .ToListAsync();
+
+            recentEntries = entries
+                .OrderByDescending(x => x.Date)
+                .Take(8)
+                .OrderBy(x => x.Date)
+                .ToList();
+
+            goal = await Db.Maalsaetninger
+                .FirstOrDefaultAsync(x => x.UserId == currentUserName);
+
+            BuildDashboard();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Fejl ved indlæsning: {ex.Message}";
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!isLoading && recentEntries.Count >= 2)
+        {
+            var labels = recentEntries.Select(x => x.Date.ToString("dd-MM")).ToList();
+            var actualData = recentEntries.Select(x => (double?)x.WeightKg).ToList();
+
+            await JS.InvokeVoidAsync(
+                "weightChartInterop.renderChart",
+                "dashboardWeightChart",
+                labels,
+                actualData,
+                new List<double?>());
+        }
+    }
+
+    private void BuildDashboard()
+    {
+        if (entries.Count == 0)
+            return;
+
+        startWeight = entries.First().WeightKg;
+        currentWeight = entries.Last().WeightKg;
+        currentBmi = entries.Last().BMI;
+        currentVisceralFat = entries.Last().VisceralFatRating;
+
+        if (startWeight.HasValue && currentWeight.HasValue)
+        {
+            weightLost = startWeight.Value - currentWeight.Value;
+        }
+
+        if (goal?.MaalVaegtKg.HasValue == true)
+        {
+            goalWeight = (double)goal.MaalVaegtKg.Value;
+
+            if (currentWeight.HasValue)
+            {
+                kgToGoal = currentWeight.Value - goalWeight.Value;
+            }
+        }
+
+        if (goal?.MaalVaegtKg.HasValue == true && goal.MaalDato.HasValue && entries.Count >= 1)
+        {
+            var startDate = entries.First().Date.Date;
+            var goalDate = goal.MaalDato.Value.Date;
+
+            expectedTodayWeight = ExpectedWeightToday(
+                startDate,
+                goalDate,
+                entries.First().WeightKg,
+                (double)goal.MaalVaegtKg.Value,
+                DateTime.Today);
+
+            var diff = entries.Last().WeightKg - (expectedTodayWeight ?? entries.Last().WeightKg);
+
+            if (diff <= -0.2)
+            {
+                statusText = $"Foran planen ({diff:0.0} kg)";
+                statusClass = "text-success";
+            }
+            else if (diff >= 0.2)
+            {
+                statusText = $"Bag planen (+{diff:0.0} kg)";
+                statusClass = "text-danger";
+            }
+            else
+            {
+                statusText = "På planen";
+                statusClass = "text-primary";
+            }
+        }
+    }
+
+    private double ExpectedWeightToday(DateTime start, DateTime goalDate, double startW, double goalW, DateTime today)
+    {
+        if (today <= start) return startW;
+        if (today >= goalDate) return goalW;
+
+        var totalDays = (goalDate - start).TotalDays;
+        var passedDays = (today - start).TotalDays;
+
+        if (totalDays <= 0) return goalW;
+
+        var progress = passedDays / totalDays;
+        return startW + ((goalW - startW) * progress);
+    }
+
+    private string DisplayWeight(double? value) => value.HasValue ? $"{value.Value:0.0} kg" : "-";
+    private string DisplayDecimal(decimal? value) => value.HasValue ? value.Value.ToString("0.0") : "-";
+    private string DisplayInt(int? value) => value.HasValue ? value.Value.ToString() : "-";
+    private string DisplayDifference(double? value) => value.HasValue ? $"{value.Value:0.0} kg" : "-";
+}
